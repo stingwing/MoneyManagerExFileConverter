@@ -72,7 +72,7 @@ namespace MoneyManagerExFileConverter
         private List<CategoryRecord> OpenCatagoryFile()
         {
             var catagores = new List<CategoryRecord>();
-            var path = Path.Combine(_config.CategoryRecordsPath, "CatagoryRecords.csv");
+            var path = _config.CategoryRecordsPath;
             if (!File.Exists(path))
                 return catagores;
 
@@ -149,17 +149,7 @@ namespace MoneyManagerExFileConverter
                 credit = decimal.TryParse(csv[2], out credit) ? credit : 0;
                 debit = decimal.TryParse(csv[3], out debit) ? debit : 0;
                 balance = decimal.TryParse(csv[4], out balance) ? balance : 0;
-                var payee = string.Empty; // default payee if no match found
-                var searchString = string.Empty; // default payee if no match found
-                foreach (var category in catagories)
-                {
-                    if (description.Contains(category.SearchString))
-                    {
-                        payee = category.Payee;
-                        searchString = category.SearchString;
-                        break; // stop searching once we find a match
-                    }
-                }
+              
 
                 var transactionRecord = new transactionRecord
                 {
@@ -168,9 +158,12 @@ namespace MoneyManagerExFileConverter
                     Credit = credit,
                     Debit = debit,
                     Balance = balance,
-                    Payee = payee,
-                    searchString = searchString,
+                    Payee = string.Empty,
+                    searchString = string.Empty,
                 };
+
+                SearchPayees(transactionRecord, line, catagories);
+
 
                 _transactionRecords.Add(transactionRecord);
             }
@@ -178,22 +171,36 @@ namespace MoneyManagerExFileConverter
             uiData.DataSource = _transactionRecords;
         }
 
+        private void SearchPayees(transactionRecord transactionRecord, string line, List<CategoryRecord> catagories)
+        {
+            var catagoryRecord = catagories.FirstOrDefault(x => transactionRecord.Description.Contains(x.SearchString));
+
+            if(catagoryRecord == null)
+                catagoryRecord = catagories.FirstOrDefault(x => transactionRecord.Description.IndexOf(x.SearchString, StringComparison.OrdinalIgnoreCase) >= 0);
+
+            if (catagoryRecord == null)
+                return;
+
+            transactionRecord.Payee = catagoryRecord.Payee;
+            transactionRecord.searchString = catagoryRecord.SearchString;
+        }
+
         private void uiExport_Click(object sender, EventArgs e)
         {
             ExportTransactionsToCsv();
             if (MessageBox.Show("Would you like to update the Transaction History?", "Update Transaction History", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                UpdateHistoricalData();           
+                UpdateHistoricalData(uiPath.Text);           
         }
 
-        private void UpdateHistoricalData()
+        private void UpdateHistoricalData(string path)
         {
             var historicalPath = Path.Combine(_config.TransactionsPath, uiAccount.Text);
             var destinationFile = Path.Combine(historicalPath, "Transactions.csv");
             var sourceFile = _config.DefaultImportPath;
 
-            if (!File.Exists(sourceFile))
+            if (!File.Exists(path))
             {
-                MessageBox.Show($"Source file not found: {sourceFile}", "File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show($"Source file not found: {path}", "File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -208,7 +215,7 @@ namespace MoneyManagerExFileConverter
                     File.Delete(destinationFile);
 
                 // Move the file
-                File.Move(sourceFile, destinationFile);
+                File.Move(path, destinationFile);
                 MessageBox.Show("Transaction file moved successfully.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -245,13 +252,12 @@ namespace MoneyManagerExFileConverter
                     writer.WriteLine(line);
                 }
             }
-
             UpdateCategoryRecords(_transactionRecords, false);
         }
 
         private void UpdateCategoryRecords(List<transactionRecord> transactionRecords, bool refresh)
         {
-            var categoryFilePath = Path.Combine(Directory.GetCurrentDirectory(), "CatagoryRecords.csv");
+            var categoryFilePath = _config.CategoryRecordsPath;
             var existingEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // Read existing entries
@@ -270,7 +276,7 @@ namespace MoneyManagerExFileConverter
 
             // Find new unique entries from transactionRecords
             var newEntries = new List<string>();
-            foreach (var record in transactionRecords)
+            foreach (var record in transactionRecords) // rewrite this
             {
                 var key = $"{record.searchString}|{record.Payee}";
                 if (!string.IsNullOrWhiteSpace(record.searchString) &&
@@ -394,7 +400,6 @@ namespace MoneyManagerExFileConverter
 
         private void uiAccount_SelectedIndexChanged(object sender, EventArgs e)
         {
-
             if (_config == null) 
                 return;
 
