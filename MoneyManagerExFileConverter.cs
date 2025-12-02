@@ -10,6 +10,7 @@ using System.Runtime.Serialization.Json;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Infragistics.Win.UltraWinListView;
 
 namespace MoneyManagerExFileConverter
 {
@@ -65,7 +66,7 @@ namespace MoneyManagerExFileConverter
                 LoadAccountsToComboBox(_config);
                 uiPath.Text = _config.DefaultImportPath;
             }
-
+       //     LoadFiles();
             uiAccount.SelectedIndexChanged += uiAccount_SelectedIndexChanged;
         }
 
@@ -93,12 +94,49 @@ namespace MoneyManagerExFileConverter
             return catagores;
         }
 
+        private void LoadFiles()
+        {
+            uiListView.Items.Clear();
+
+            var searchFolder = "C:\\Current Working";     //         .. Path.Combine(_searchFolder, Enum.GetName(typeof(ImportTypeEnum), ImportTypeEnum.Products));
+
+
+            if (!Directory.Exists(searchFolder))
+            { 
+                MessageBox.Show("Folder specified in system settings is invalid.", "Invalid folder", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            uiPath.Text = searchFolder;
+      //      DowloadFTPFiles("ProductData/");
+            var files = Directory.GetFiles(searchFolder);
+
+            foreach (var file in files)
+            {
+                // var line = new ListViewItem(file);
+                // line.Tag = file;
+                // uiListView.Items.Add(line);
+
+                // Fix: Use UltraListViewItem instead of ListViewItem
+                var ultraItem = new Infragistics.Win.UltraWinListView.UltraListViewItem(file);
+                uiListView.Items.Add(ultraItem);
+            }
+        }
+
+
         private List<string> OpenHistoricalData()
         {
+            var _importFile = new List<string>();
             var path = Path.Combine(_config.TransactionsPath, uiAccount.Text, "Transactions.csv");
-            var logFile = File.ReadAllLines(path);
-            var _importFile = new List<string>(logFile);
-
+            try
+            {      
+                var logFile = File.ReadAllLines(path);
+                _importFile = new List<string>(logFile);
+            }
+            catch 
+            {
+                MessageBox.Show($"Missing File {path}");
+            }
             return _importFile;
         }
 
@@ -125,11 +163,25 @@ namespace MoneyManagerExFileConverter
                 return;
 
             var logFile = File.ReadAllLines(path);
-            var _importFile = new List<string>(logFile);
+            var data = new List<string>(logFile);
 
+            if(uiAccount.Text.Contains("ING"))
+                INGFile(historicalData, catagories, data);
+
+            if (uiAccount.Text.Contains("MAC"))
+                MACFile(historicalData, catagories, data);
+
+            if (uiAccount.Text.Contains("COMM"))
+                COMMFile(historicalData, catagories, data);
+
+            uiData.DataSource = _transactionRecords;
+        }
+
+        private void INGFile(List<string>historicalData, List<CategoryRecord> catagories, List<string> importData)
+        {
             var first = true;
 
-            foreach (var line in _importFile)
+            foreach (var line in importData)
             {
                 if (first)
                 {
@@ -149,7 +201,6 @@ namespace MoneyManagerExFileConverter
                 credit = decimal.TryParse(csv[2], out credit) ? credit : 0;
                 debit = decimal.TryParse(csv[3], out debit) ? debit : 0;
                 balance = decimal.TryParse(csv[4], out balance) ? balance : 0;
-              
 
                 var transactionRecord = new transactionRecord
                 {
@@ -163,12 +214,91 @@ namespace MoneyManagerExFileConverter
                 };
 
                 SearchPayees(transactionRecord, line, catagories);
-
-
                 _transactionRecords.Add(transactionRecord);
             }
+        }
 
-            uiData.DataSource = _transactionRecords;
+        private void MACFile(List<string> historicalData, List<CategoryRecord> catagories, List<string> importData)
+        {
+            //Transaction Date,Details,Account,Category,Subcategory,Tags,Notes,Debit,Credit,Balance,Original Description
+            var first = true;
+
+            foreach (var line in importData)
+            {
+                if (first)
+                {
+                    first = false;
+                    continue; // skip the header line
+                }
+
+                if (historicalData.Contains(line))
+                    continue;
+
+                var csv = SplitCSVLine(line, true);
+
+                decimal credit = 0, debit = 0, balance = 0;
+
+                var date = DateTime.Parse(csv[0]).Date;
+                var description = csv[1];
+                credit = decimal.TryParse(csv[8], out credit) ? credit : 0;
+                debit = decimal.TryParse(csv[7], out debit) ? debit : 0;
+                balance = decimal.TryParse(csv[9], out balance) ? balance : 0;
+
+                var transactionRecord = new transactionRecord
+                {
+                    Date = date,
+                    Description = description,
+                    Credit = credit,
+                    Debit = debit,
+                    Balance = balance,
+                    Payee = string.Empty,
+                    searchString = string.Empty,
+                };
+
+                SearchPayees(transactionRecord, line, catagories);
+                _transactionRecords.Add(transactionRecord);
+            }
+        }
+
+        private void COMMFile(List<string> historicalData, List<CategoryRecord> catagories, List<string> importData)
+        {
+            //Transaction Date,CREDIT/Debit,Account,Balance
+           
+            foreach (var line in importData)
+            {               
+                if (historicalData.Contains(line))
+                    continue;
+
+                var csv = SplitCSVLine(line, true);
+
+                decimal credit = 0, debit = 0, balance = 0;
+
+                var date = DateTime.Parse(csv[0]).Date;
+                var description = csv[2];
+
+                var amountString = csv[1];
+
+                if(amountString.Contains("+"))
+                    credit = decimal.TryParse(amountString.Substring(1), out credit) ? credit : 0;
+                else if(amountString.Contains("-"))
+                    debit = decimal.TryParse(amountString.Substring(1), out debit) ? debit : 0;
+               
+                balance = decimal.TryParse(csv[3].Substring(1), out balance) ? balance : 0;
+
+                var transactionRecord = new transactionRecord
+                {
+                    Date = date,
+                    Description = description,
+                    Credit = credit,
+                    Debit = debit,
+                    Balance = balance,
+                    Payee = string.Empty,
+                    searchString = string.Empty,
+                };
+
+                SearchPayees(transactionRecord, line, catagories);
+                _transactionRecords.Add(transactionRecord);
+            }
         }
 
         private void SearchPayees(transactionRecord transactionRecord, string line, List<CategoryRecord> catagories)
@@ -383,6 +513,29 @@ namespace MoneyManagerExFileConverter
             }
         }
 
+        private void SaveConfig()
+        {
+            if (_config == null) throw new ArgumentNullException(nameof(_config));
+
+            var path = GetConfigFilePath();
+            try
+            {
+                var dir = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
+
+                using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    var serializer = new DataContractJsonSerializer(typeof(AppConfig));
+                    serializer.WriteObject(stream, _config);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to save config: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private void LoadAccountsToComboBox(AppConfig config)
         {
             uiAccount.Items.Clear();
@@ -410,6 +563,15 @@ namespace MoneyManagerExFileConverter
 
             var subfolder = Path.Combine(_config.TransactionsPath, selectedAccount);
             Directory.CreateDirectory(subfolder);
+        }
+
+        private void uiSaveSettings_Click(object sender, EventArgs e)
+        {
+            if (_config == null) 
+                return;
+
+            SaveConfig();   
+            MessageBox.Show("Settings saved successfully.", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 }
